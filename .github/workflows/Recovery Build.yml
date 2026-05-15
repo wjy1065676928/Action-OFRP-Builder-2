@@ -101,6 +101,7 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-android-repo-${{ github.event.inputs.MANIFEST_BRANCH }}
           ${{ runner.os }}-android-repo-
+        lookup-only: true
 
     - name: Setup SSH Keys
       if: ${{ startsWith(github.event.inputs.DEVICE_TREE_URL, 'git@github.com') ||
@@ -116,6 +117,15 @@ jobs:
         cd sync
         ./orangefox_sync.sh --branch ${{ github.event.inputs.MANIFEST_BRANCH }} --path ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
+    - name: Save repo metadata cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/.repo
+        key: ${{ runner.os }}-android-repo-${{ github.event.inputs.MANIFEST_BRANCH }}
+        restore-keys: |
+          ${{ runner.os }}-android-repo-${{ github.event.inputs.MANIFEST_BRANCH }}
+          ${{ runner.os }}-android-repo-
 
     - name: Clone device tree
       run: |
