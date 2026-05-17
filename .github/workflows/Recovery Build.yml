@@ -150,6 +150,31 @@ jobs:
         git clone --depth=1 "${{ github.event.inputs.COMMON_TREE_URL }}" -b "${{ github.event.inputs.DEVICE_TREE_BRANCH }}" "./${{ github.event.inputs.COMMON_PATH }}"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
+    - name: Prepare DTB image
+      run: |
+        cd ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
+        mkdir -p out/target/product/${{ github.event.inputs.DEVICE_NAME }}
+        
+        # Search for dtb.img in device tree directories
+        echo "Searching for dtb.img or *.dtb files..."
+        DTB_IMG=$(find device -name "dtb.img" 2>/dev/null | head -1)
+        DTB_FILE=$(find device -name "*.dtb" 2>/dev/null | head -1)
+        
+        if [ -n "$DTB_IMG" ]; then
+          echo "Found dtb.img at: $DTB_IMG"
+          cp -v "$DTB_IMG" "out/target/product/${{ github.event.inputs.DEVICE_NAME }}/dtb.img"
+        elif [ -n "$DTB_FILE" ]; then
+          echo "Found *.dtb file at: $DTB_FILE"
+          cp -v "$DTB_FILE" "out/target/product/${{ github.event.inputs.DEVICE_NAME }}/dtb.img"
+        else
+          echo "Warning: No dtb.img or *.dtb found in device tree. Build may fail."
+          echo "Searched in: device directory"
+          find device -type f \( -name "*.dtb" -o -name "dtb*" \) 2>/dev/null || true
+        fi
+        
+        echo "DTB preparation complete."
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
     - name: Set Swap Space
       uses: pierotofy/set-swap-space@master
       with:
