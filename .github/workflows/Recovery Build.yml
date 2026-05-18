@@ -115,13 +115,6 @@ jobs:
         cd ${{ steps.pwd.outputs.workspace-folder }}
         git clone --depth=1 "${{ github.event.inputs.SYNC_URL }}"
         cd sync
-        sudo curl -sS https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo
-        sudo chmod a+x /usr/local/bin/repo
-        mkdir -p repo-wrap
-        printf '#!/bin/bash\nif [ "$1" = "sync" ]; then\n  shift\n  /usr/local/bin/repo sync -c -j16 --no-tags --no-clone-bundle "$@"\nelse\n  /usr/local/bin/repo "$@"\nfi\n' > repo-wrap/repo
-        chmod +x repo-wrap/repo
-        export PATH="$PWD/repo-wrap:$PATH"
-        # Force shallow clone for any git clone calls inside the script to speed up fetches
         sed -i 's/git clone /git clone --depth=1 /g' ./orangefox_sync.sh || true
         ./orangefox_sync.sh --branch ${{ github.event.inputs.MANIFEST_BRANCH }} --path ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
