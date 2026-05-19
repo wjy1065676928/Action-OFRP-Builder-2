@@ -193,6 +193,38 @@ jobs:
         set -e
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
+    - name: Patch vibrator path in events.cpp
+      run: |
+        FOX_DIR="${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}"
+        
+        # Auto-detect events.cpp location
+        EVENTS_CPP=$(find "$FOX_DIR" -path "*/recovery/*/events.cpp" -o -path "*/minuitwrp/events.cpp" 2>/dev/null | head -1)
+        
+        if [ -z "$EVENTS_CPP" ]; then
+          # Broader fallback
+          EVENTS_CPP=$(find "$FOX_DIR" -name "events.cpp" -path "*/recovery/*" 2>/dev/null | head -1)
+        fi
+        
+        if [ -z "$EVENTS_CPP" ]; then
+          echo "Warning: events.cpp not found under recovery path, trying broader search..."
+          EVENTS_CPP=$(find "$FOX_DIR" -name "events.cpp" 2>/dev/null | head -1)
+        fi
+        
+        if [ -n "$EVENTS_CPP" ]; then
+          echo "Found events.cpp at: $EVENTS_CPP"
+          
+          # Apply vibrator path patches
+          sed -i 's|/sys/class/leds/vibrator/duration|/sys/devices/platform/soc/89c000.i2c/i2c-1/1-005a/duration|g' "$EVENTS_CPP"
+          sed -i 's|/sys/class/leds/vibrator/activate|/sys/devices/platform/soc/89c000.i2c/i2c-1/1-005a/activate|g' "$EVENTS_CPP"
+          
+          echo "Vibrator paths patched in: $EVENTS_CPP"
+          grep -n "vibrator\|activate\|duration" "$EVENTS_CPP" || true
+        else
+          echo "Warning: events.cpp not found anywhere in source tree, skipping patch."
+          find "$FOX_DIR" -name "events.cpp" 2>/dev/null || true
+        fi
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
     - name: Set Swap Space
       uses: pierotofy/set-swap-space@master
       with:
