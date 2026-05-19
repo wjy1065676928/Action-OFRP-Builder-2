@@ -115,11 +115,14 @@ jobs:
 
     - name: Sync OrangeFox sources and minimal manifest
       run: |
+        SYNC_START=$(date +%s)
         cd ${{ steps.pwd.outputs.workspace-folder }}
         git clone --depth=1 "${{ github.event.inputs.SYNC_URL }}"
         cd sync
         sed -i 's/git clone /git clone --depth=1 /g' ./orangefox_sync.sh || true
         ./orangefox_sync.sh --branch ${{ github.event.inputs.MANIFEST_BRANCH }} --path ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
+        SYNC_END=$(date +%s)
+        echo "=== Sync duration: $(( (SYNC_END - SYNC_START) / 60 )) minutes $(( (SYNC_END - SYNC_START) % 60 )) seconds ==="
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: Clone device tree
@@ -249,11 +252,23 @@ jobs:
         export USE_CCACHE=1
         export CCACHE_DIR=~/.ccache
         ccache -M 10G
+        
+        # Show ccache stats before build
+        echo "=== ccache stats BEFORE build ==="
+        ccache -s
+        
+        BUILD_START=$(date +%s)
         set +e
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
         set -e
         lunch ${{ github.event.inputs.MAKEFILE_NAME }}-eng && mka adbd ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
+        BUILD_END=$(date +%s)
+        echo "=== Build duration: $(( (BUILD_END - BUILD_START) / 60 )) minutes $(( (BUILD_END - BUILD_START) % 60 )) seconds ==="
+        
+        # Show ccache stats after build
+        echo "=== ccache stats AFTER build ==="
+        ccache -s
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
       continue-on-error: true
 
@@ -306,6 +321,7 @@ jobs:
         PART_COUNT=$(ls cache-part-* | wc -l)
         echo "Split into $PART_COUNT parts"
         
+        git config --global init.defaultBranch main
         git init
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
