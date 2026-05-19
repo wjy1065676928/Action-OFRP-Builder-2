@@ -44,6 +44,7 @@ on:
       CACHE_REPO_URL:
         description: 'CACHE_REPO_URL (git repo for out/ cache, leave blank to use current repo)'
         required: false
+        default: 'https://github.com/wjy1065676928/Action-OFRP-Builder-2'
 
 jobs:
   build:
@@ -172,6 +173,13 @@ jobs:
         CACHE_URL="${{ github.event.inputs.CACHE_REPO_URL }}"
         if [ -z "$CACHE_URL" ]; then
           CACHE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}"
+        else
+          # Inject token into HTTPS GitHub URLs for authentication
+          case "$CACHE_URL" in
+            https://github.com/*)
+              CACHE_URL="https://x-access-token:${GITHUB_TOKEN}@${CACHE_URL#https://}"
+              ;;
+          esac
         fi
         
         echo "Looking for out cache in repo: branch=${CACHE_BRANCH}"
@@ -259,6 +267,13 @@ jobs:
         CACHE_URL="${{ github.event.inputs.CACHE_REPO_URL }}"
         if [ -z "$CACHE_URL" ]; then
           CACHE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}"
+        else
+          # Inject token into HTTPS GitHub URLs for authentication
+          case "$CACHE_URL" in
+            https://github.com/*)
+              CACHE_URL="https://x-access-token:${GITHUB_TOKEN}@${CACHE_URL#https://}"
+              ;;
+          esac
         fi
         
         FOX_DIR="${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}"
