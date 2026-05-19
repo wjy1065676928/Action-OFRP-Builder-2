@@ -212,15 +212,22 @@ jobs:
       run: |
         FOX_DIR="${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}"
         cd "$FOX_DIR"
+        
+        BUILD_START=$(date +%s)
+        set +e
+        source build/envsetup.sh
+        export ALLOW_MISSING_DEPENDENCIES=true
+        set -e
+        lunch ${{ github.event.inputs.MAKEFILE_NAME }}-eng
+        
+        # Configure ccache AFTER envsetup (which may reset ccache settings)
         mkdir -p ~/.ccache
         export USE_CCACHE=1
         export CCACHE_DIR=~/.ccache
-        ccache -M 10G
-        
-        # Critical for CI: strip absolute paths from ccache hash
+        # Critical for CI: make ccache work across different runner paths
         export CCACHE_NOHASHDIR=true
-        export CCACHE_BASEDIR="$FOX_DIR"
         export CCACHE_SLOPPINESS=file_macro,include_file_mtime,time_macros
+        ccache -M 10G
         
         # Diagnostic: check ccache directory
         echo "=== ccache directory check ==="
@@ -232,12 +239,8 @@ jobs:
         echo "=== ccache stats BEFORE build ==="
         ccache -s
         
-        BUILD_START=$(date +%s)
-        set +e
-        source build/envsetup.sh
-        export ALLOW_MISSING_DEPENDENCIES=true
-        set -e
-        lunch ${{ github.event.inputs.MAKEFILE_NAME }}-eng && mka adbd ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
+        # Build recovery image
+        mka adbd ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
         BUILD_END=$(date +%s)
         echo "=== Build duration: $(( (BUILD_END - BUILD_START) / 60 )) minutes $(( (BUILD_END - BUILD_START) % 60 )) seconds ==="
         
