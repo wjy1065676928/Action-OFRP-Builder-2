@@ -41,6 +41,9 @@ on:
         description: 'BUILD_TARGET'
         required: true
         default: 'recovery'
+      CACHE_REPO_URL:
+        description: 'CACHE_REPO_URL (git repo for out/ cache, leave blank to use current repo)'
+        required: false
 
 jobs:
   build:
@@ -70,7 +73,7 @@ jobs:
         sudo apt update && sudo apt upgrade -y
         DEBIAN_FRONTEND=noninteractive sudo apt install -yq \
             linux-modules-extra-$(uname -r) \
-            git python3 tar aria2 ccache
+            git python3 tar aria2 ccache zstd
         git clone https://gitlab.com/OrangeFox/misc/scripts
         cd scripts
         sudo bash setup/android_build_env.sh
@@ -93,15 +96,14 @@ jobs:
           ${{ runner.os }}-android-ccache-${{ github.event.inputs.MANIFEST_BRANCH }}-
           ${{ runner.os }}-android-ccache-
 
-    - name: Cache repo metadata
+    - name: Restore & Save repo metadata cache
       uses: actions/cache@v4
       with:
         path: ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/.repo
-        key: ${{ runner.os }}-android-repo-${{ github.event.inputs.MANIFEST_BRANCH }}
+        key: ${{ runner.os }}-android-repo-${{ github.event.inputs.MANIFEST_BRANCH }}-${{ github.event.inputs.DEVICE_NAME }}
         restore-keys: |
-          ${{ runner.os }}-android-repo-${{ github.event.inputs.MANIFEST_BRANCH }}
+          ${{ runner.os }}-android-repo-${{ github.event.inputs.MANIFEST_BRANCH }}-
           ${{ runner.os }}-android-repo-
-        lookup-only: true
 
     - name: Setup SSH Keys
       if: ${{ startsWith(github.event.inputs.DEVICE_TREE_URL, 'git@github.com') ||
@@ -118,15 +120,6 @@ jobs:
         sed -i 's/git clone /git clone --depth=1 /g' ./orangefox_sync.sh || true
         ./orangefox_sync.sh --branch ${{ github.event.inputs.MANIFEST_BRANCH }} --path ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
-
-    - name: Save repo metadata cache
-      uses: actions/cache@v4
-      with:
-        path: ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/.repo
-        key: ${{ runner.os }}-android-repo-${{ github.event.inputs.MANIFEST_BRANCH }}
-        restore-keys: |
-          ${{ runner.os }}-android-repo-${{ github.event.inputs.MANIFEST_BRANCH }}
-          ${{ runner.os }}-android-repo-
 
     - name: Clone device tree
       run: |
@@ -168,6 +161,38 @@ jobs:
         echo "DTB preparation complete."
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
+    - name: Restore out/ cache from repo branch
+      id: restore-cache
+      run: |
+        set +e
+        DEVICE="${{ github.event.inputs.DEVICE_NAME }}"
+        CACHE_BRANCH="cache-${DEVICE}"
+        CACHE_URL="${{ github.event.inputs.CACHE_REPO_URL }}"
+        if [ -z "$CACHE_URL" ]; then
+          CACHE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}"
+        fi
+        
+        echo "Looking for out cache in repo: branch=${CACHE_BRANCH}"
+        
+        if git clone --depth=1 -b "$CACHE_BRANCH" "$CACHE_URL" /tmp/cache-repo 2>/dev/null; then
+          if [ -f /tmp/cache-repo/out-cache.tar.zst ]; then
+            echo "Cache found! Extracting..."
+            tar --zstd -xf /tmp/cache-repo/out-cache.tar.zst \
+              -C "${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}"
+            echo "cache_restored=true" >> $GITHUB_OUTPUT
+            echo "Out cache restored successfully."
+          else
+            echo "cache_restored=false" >> $GITHUB_OUTPUT
+            echo "Branch exists but no cache file found."
+          fi
+          rm -rf /tmp/cache-repo
+        else
+          echo "cache_restored=false" >> $GITHUB_OUTPUT
+          echo "Cache branch '${CACHE_BRANCH}' not found, will build from scratch."
+        fi
+        set -e
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
     - name: Set Swap Space
       uses: pierotofy/set-swap-space@master
       with:
@@ -179,7 +204,7 @@ jobs:
         mkdir -p ~/.ccache
         export USE_CCACHE=1
         export CCACHE_DIR=~/.ccache
-        ccache -M 30G
+        ccache -M 10G
         set +e
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
@@ -187,6 +212,54 @@ jobs:
         lunch ${{ github.event.inputs.MAKEFILE_NAME }}-eng && mka adbd ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
       continue-on-error: true
+
+    - name: Save out/ cache to repo branch
+      if: success()
+      env:
+        GIT_TERMINAL_PROMPT: 0
+      run: |
+        set +e
+        DEVICE="${{ github.event.inputs.DEVICE_NAME }}"
+        CACHE_BRANCH="cache-${DEVICE}"
+        CACHE_URL="${{ github.event.inputs.CACHE_REPO_URL }}"
+        if [ -z "$CACHE_URL" ]; then
+          CACHE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}"
+        fi
+        
+        FOX_DIR="${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}"
+        OUT_DIR="${FOX_DIR}/out/target/product/${DEVICE}"
+        
+        if [ ! -d "$OUT_DIR" ]; then
+          echo "Output directory not found, skipping cache upload."
+          exit 0
+        fi
+        
+        echo "Compressing out directory (excluding final images)..."
+        cd "$FOX_DIR"
+        tar --zstd \
+          --exclude="out/target/product/${DEVICE}/*.img" \
+          --exclude="out/target/product/${DEVICE}/*.zip" \
+          -cf /tmp/out-cache.tar.zst \
+          "out/target/product/${DEVICE}/"
+        
+        CACHE_SIZE=$(du -h /tmp/out-cache.tar.zst | cut -f1)
+        echo "Compressed cache size: $CACHE_SIZE"
+        
+        # Create orphan branch with just the cache file, then force push
+        rm -rf /tmp/cache-repo
+        git init /tmp/cache-repo
+        cd /tmp/cache-repo
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        cp /tmp/out-cache.tar.zst .
+        git add -A
+        git commit -m "Update out cache for ${DEVICE} [$(date -u +'%Y-%m-%d %H:%M UTC')]"
+        git remote add origin "$CACHE_URL"
+        git push -f origin HEAD:refs/heads/${CACHE_BRANCH}
+        
+        echo "Out cache saved to branch '${CACHE_BRANCH}'. Size: ${CACHE_SIZE}"
+        set -e
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: Check the output directory before uploading
       run: |
