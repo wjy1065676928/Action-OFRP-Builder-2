@@ -185,15 +185,17 @@ jobs:
         echo "Looking for out cache in repo: branch=${CACHE_BRANCH}"
         
         if git clone --depth=1 -b "$CACHE_BRANCH" "$CACHE_URL" /tmp/cache-repo 2>/dev/null; then
-          if [ -f /tmp/cache-repo/out-cache.tar.zst ]; then
-            echo "Cache found! Extracting..."
-            tar --zstd -xf /tmp/cache-repo/out-cache.tar.zst \
+          PART_COUNT=$(ls /tmp/cache-repo/cache-part-* 2>/dev/null | wc -l)
+          if [ "$PART_COUNT" -gt 0 ]; then
+            echo "Cache found ($PART_COUNT parts)! Reconstructing and extracting..."
+            cat /tmp/cache-repo/cache-part-* > /tmp/out-cache.tar.zst
+            tar --zstd -xf /tmp/out-cache.tar.zst \
               -C "${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}"
             echo "cache_restored=true" >> $GITHUB_OUTPUT
             echo "Out cache restored successfully."
           else
             echo "cache_restored=false" >> $GITHUB_OUTPUT
-            echo "Branch exists but no cache file found."
+            echo "Branch exists but no cache parts found."
           fi
           rm -rf /tmp/cache-repo
         else
@@ -295,13 +297,18 @@ jobs:
         CACHE_SIZE=$(du -h /tmp/out-cache.tar.zst | cut -f1)
         echo "Compressed cache size: $CACHE_SIZE"
         
-        # Create orphan branch with just the cache file, then force push
+        # Split into chunks under 100MB (GitHub limit), then push
         rm -rf /tmp/cache-repo
-        git init /tmp/cache-repo
+        mkdir /tmp/cache-repo
         cd /tmp/cache-repo
+        split -b 95M /tmp/out-cache.tar.zst cache-part-
+        
+        PART_COUNT=$(ls cache-part-* | wc -l)
+        echo "Split into $PART_COUNT parts"
+        
+        git init
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        cp /tmp/out-cache.tar.zst .
         git add -A
         git commit -m "Update out cache for ${DEVICE} [$(date -u +'%Y-%m-%d %H:%M UTC')]"
         git remote add origin "$CACHE_URL"
