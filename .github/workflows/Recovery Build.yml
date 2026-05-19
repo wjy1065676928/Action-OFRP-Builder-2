@@ -163,6 +163,8 @@ jobs:
 
     - name: Restore out/ cache from repo branch
       id: restore-cache
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         set +e
         DEVICE="${{ github.event.inputs.DEVICE_NAME }}"
@@ -249,6 +251,7 @@ jobs:
       if: success()
       env:
         GIT_TERMINAL_PROMPT: 0
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         set +e
         DEVICE="${{ github.event.inputs.DEVICE_NAME }}"
