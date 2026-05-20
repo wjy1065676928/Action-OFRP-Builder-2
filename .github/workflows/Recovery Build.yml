@@ -192,10 +192,11 @@ jobs:
           echo "Found events.cpp at: $EVENTS_CPP"
           
           # Apply vibrator path patches
-          sed -i 's|/sys/class/leds/vibrator/duration|/sys/devices/platform/soc/89c000.i2c/i2c-1/1-005a/duration|g' "$EVENTS_CPP"
-          sed -i 's|/sys/class/leds/vibrator/activate|/sys/devices/platform/soc/89c000.i2c/i2c-1/1-005a/activate|g' "$EVENTS_CPP"
-          
-          echo "Vibrator paths patched in: $EVENTS_CPP"
+
+        sed -i 's|/sys/class/timed_output/vibrator/enable|/sys/devices/platform/soc/89c000.i2c/i2c-1/1-005a/activate_mode|' bootable/recovery/minuitwrp/events.cpp
+        sed -i 's|/sys/class/leds/vibrator/duration|/sys/devices/platform/soc/89c000.i2c/i2c-1/1-005a/activate_mode|' bootable/recovery/minuitwrp/events.cpp
+        sed -i 's|/sys/class/leds/vibrator/activate|/sys/devices/platform/soc/89c000.i2c/i2c-1/1-005a/activate_mode|' bootable/recovery/minuitwrp/events.cpp
+
           grep -n "vibrator\|activate\|duration" "$EVENTS_CPP" || true
         else
           echo "Warning: events.cpp not found anywhere in source tree, skipping patch."
